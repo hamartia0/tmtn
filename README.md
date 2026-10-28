@@ -6,9 +6,9 @@
 
 <p align="center"><b><i>TMTN = The Match, The Night</i></b></p>
 
-<p align="center">当前版本 <b>v2.5</b> · 更新内容见 <a href="CHANGELOG.md">CHANGELOG.md</a></p>
+<p align="center">当前版本 <b>v3.98</b> · 更新内容见 <a href="CHANGELOG.md">CHANGELOG.md</a></p>
 
-> **English summary.** TMTN is a local, single-user trading terminal for BSC "agent-only" meme launchpads — **Flap Agent Bonding Curve**, **Four.meme (OpenFour, Agent-ID-exclusive template)** and **gang.fun (old pad + V2 pads)**. It runs a small Node.js server on `127.0.0.1` plus a browser UI. All signing goes through Binance's **Agentic Wallet CLI (`baw`)**, so **no private key is ever stored or handled locally**. Features include a GMGN-style trenches view, K-line charts, live trade feed, per-trader PnL drawer, one-click buy/sell panel, holdings with USD PnL, auto-claim and optional per-platform auto-transfer. **It trades real funds. It is unaudited. Use entirely at your own risk.**
+> **English summary.** TMTN is a local, single-user trading terminal for BSC "agent-only" meme launchpads — **Flap Agent Bonding Curve**, **Four.meme (OpenFour, Agent-ID-exclusive template)** and **gang.fun (old pad + V2 pads)**. It runs a small Node.js server on `127.0.0.1` plus a browser UI. All signing goes through Binance's **Agentic Wallet CLI (`baw`)**, so **no private key is ever stored or handled locally**. Features include a GMGN-style trenches view, K-line charts, live trade feed, per-trader PnL drawer, one-click buy/sell panel, holdings with USD PnL, auto-claim and an optional MySQL + Redis history cache. **It trades real funds. It is unaudited. Use entirely at your own risk.**
 
 ---
 
@@ -17,7 +17,6 @@
 - **这是会动用真实资金的软件。** 以实盘模式（`LIVE_TRADE=1`）运行时，你在页面上点的买卖会通过币安 Agentic 钱包真实上链，**无法撤回**。
 - **不构成任何投资建议。** meme 代币波动极大、流动性差、可能归零或无法卖出；作者不对任何亏损负责。
 - **代码未经审计**，可能存在 bug（价格换算、精度、授权、路由等）。请先用模拟盘和极小金额试用。
-- **自动转出（自动把领取 / 发射后的代币转到指定地址）**：一旦打开，资金会在无人确认的情况下转走。请确认目标地址是你自己的，并理解风险后再打开。默认全部关闭。
 - **预先授权（较大固定额度）**：为了更快，卖出 / 报价币买入时会授权比本次需要更大的额度（不是无限额）。被授权合约如果出问题，可动用的代币会更多。可以在页面关闭，或在「授权管理」里随时撤销。
 - 本项目与币安、Flap、four.meme、gang.fun 等平台**没有任何关联**，第三方接口随时可能变化或失效。
 
@@ -39,7 +38,6 @@
 - **收藏**（分组、顶部收藏栏）、**屏蔽列表**（代币 / 开发者，存服务器）
 - **税率显示与筛选**：代币税、平台费、防狙击税
 - **自动领取**：Flap 曲线发射后自动 `Portal.claim`
-- **自动转出（可选，按平台分别开关）**：Flap 领取后 / Four 发射后 / Gang 发射后，把这个币的全部余额转到 `AUTO_TRANSFER_TO`；每个币只转一次、失败重试、遇到币安 App 确认会等待
 - **卖出后自动换回 BNB**：BNCB / GANG / 币股计价的盘，卖出到账的报价币（只这一笔的链上余额差）自动换成 BNB
 - **预先授权（较大固定额度）+ 授权管理**（查看链上额度、逐条撤销）
 - **耗时记录**：每笔订单的各阶段耗时写入 `data/latency.jsonl`（点击到服务器、下单前检查、广播、上链…）
@@ -55,7 +53,7 @@ baw auth signin            # 按提示在币安 App 里扫码 / 确认
 baw wallet status          # 显示 CONNECTED 即可
 ```
 
-> **必须先登录。** 实盘模式（`MODE=live`）下，程序每 10 秒用 `baw wallet status` 检查一次登录状态。未登录（或登录过期）时，页面会被一个关不掉的遮罩挡住，提示在终端运行 `baw auth signin`、在币安 App 中确认；所有动用资金的接口（下单、兑换、换回 BNB、领取、撤销授权、单币转出规则）都会返回 401「币安钱包未登录」。登录完成后遮罩自动消失。偶尔一次检查失败不算掉线，连续 2 次才会锁定。没装 baw 时遮罩会提示安装命令。模拟盘不受影响。
+> **必须先登录。** 实盘模式（`MODE=live`）下，程序每 10 秒用 `baw wallet status` 检查一次登录状态。未登录（或登录过期）时，页面会被一个关不掉的遮罩挡住，提示在终端运行 `baw auth signin`、在币安 App 中确认；所有动用资金的接口（下单、兑换、换回 BNB、领取、撤销授权、单币规则）都会返回 401「币安钱包未登录」。登录完成后遮罩自动消失。偶尔一次检查失败不算掉线，连续 2 次才会锁定。没装 baw 时遮罩会提示安装命令。模拟盘不受影响。
 
 - 交易 Four 专属模板需要币安的技能脚本（提供 `agent-id-exclusive-token-launches.mjs`）：
 
@@ -91,6 +89,20 @@ scripts/add-wallet.sh --peers --write-env         # 写进 .env 的 WALLET_PEERS
 
 页面右上角的钱包菜单里打开钱包 2 的「参与下单」后：买入时每个钱包各花输入的 BNB；卖出时每个钱包卖自己持仓的同样比例；两个钱包并行执行，结果分别提示。没登录 / 后端没启动的钱包自动跳过。持仓页可以看全部钱包合并，或者只看某一个钱包。
 
+### 历史数据缓存（可选，MySQL + Redis）
+
+配上之后，各盘从开盘起的成交、外盘分钟 K 线、BNB 小时价、钱包交易记录会存进 MySQL，重启或再次点开同一个币只补新的（Gang 大盘从翻 100 页变成 1 页，Four / Flap 门槛盘不再从创建区块重扫）。不配也照常运行，数据库连不上时自动走原来的路径。装好 Docker 后一条命令开启：`scripts/enable-cache.sh`，然后重启。详细说明见 **[docs/cache.md](docs/cache.md)**。
+
+### 更新与回退版本
+
+点页面右下角的版本号（有新版本时旁边亮 **NEW**）打开「版本管理」：看当前版本是不是最新、新版本的更新说明，「重新检查」「完整说明」，以及「一键回退历史版本」。更新和回退都要自己点，不会自动执行。
+
+- 只替换程序代码，`data/`、`.env`、钱包登录、`node_modules` 都不动；依赖有变化时自动 `npm install`
+- 每次切换前把当前代码打包备份到 `data/updates/`（保留最近 10 份），在同一个面板里可以一键恢复
+- 本地改过代码时会先列出改过的文件，确认后才覆盖（仍会先备份）；用 `git clone` 安装的走 `git checkout <tag>`，本地未提交的改动先存进 `git stash`
+- 完成后服务自动重启（同样的启动参数和环境变量，日志接着写原来的文件），页面自动刷新
+- Docker 部署和 `npm run dev`（`node --watch`）下不能在线切换；`TMTN_UPDATE=0` 可以关掉这个功能。多钱包时其他钱包的后端要另外更新
+
 ### 环境变量
 
 | 变量 | 默认 | 说明 |
@@ -99,12 +111,17 @@ scripts/add-wallet.sh --peers --write-env         # 写进 .env 的 WALLET_PEERS
 | `PORT` | `8787` | 端口 |
 | `LIVE_TRADE` | `0` | `1` = 实盘真实下单（只接受手动点击的订单）；`0` = 只报价 / 预演 |
 | `MAX_TRADE_BNB` | `0.5` | 单笔买入上限（BNB）的初始值，页面里改过后以 `data/live-settings.json` 为准；`0` = 不限 |
-| `AUTO_TRANSFER_TO` | （空） | 自动转出的目标地址。**请设成你自己的地址**；留空时三个自动转出开关都打不开 |
-| `AUTO_TRANSFER_FOUR` | `0` | 旧开关：`1` = Four 发射后自动转出（现在一般用页面上的开关） |
-| `PREAPPROVE` | `0` | 旧功能：买入后无限额预授权，**不建议打开** |
+| `PREAPPROVE_AFTER_BUY` | `1` | 买入成交后后台按固定额度预先授权（卖出 = 余额 × 1.01，报价币 ≈ 2 倍单笔上限，不是无限额），第一次卖出不用等授权；还要页面「预先授权」开着。`0` = 只在需要时授权 |
 | `NODEREAL_RPC` | （空） | 私有 RPC（例如 NodeReal，含 key，只放 `.env`）。填了就作为主节点：读链、查确认、扫 Four 事件（一次约 5 万块），并通过它的 WSS 订阅 Gang 新盘创建事件；公共节点自动备用 |
 | `NODEREAL_KEYS` | （空） | 多个 NodeReal key，逗号分隔（如 `key1,key2`，只放 `.env`）。轮流使用，被限流 / 额度用完的 key 冷却 5 分钟；页面只显示「NodeReal #1 / #2」，不显示 key |
 | `RPC_URL` | 有 `NODEREAL_RPC` 用它，否则 `https://bsc-dataseed.bnbchain.org` | 读链用的 BSC RPC |
+| `RPC_URL_MAX_PER_MIN` | `150` | `RPC_URL` 是付费节点（如 Chainstack）时，行情 eth_call 溢出到它的每分钟上限（公共节点限流时才会用到），超了先用别的节点，免得把月额度吃光。交易不计、不受限 |
+| `LOGS_RPC_URL` | 同 `RPC_URL`（公共节点 / NodeReal 除外） | 日志节点：所有 `eth_getLogs`（补查、历史回补、追踪回补、Four 扫描）优先发给它 |
+| `LOGS_MAX_PER_MIN` | `150` | 日志节点每分钟最多处理多少次 getLogs，超了这一分钟回到公共节点 |
+| `LOGS_SPAN` | `10000` | 日志节点一次 getLogs 的最大区块数（Chainstack 付费档 1 万块），更大的区间自动拆段 |
+| `RPC_ARCHIVE` | `0` | 日志节点是归档节点（如 Chainstack Growth）时填 `1`：Gang V3 / stocks pad 盘的链上历史最多往前补 300 万块（约半个月），否则 30 万块 |
+| `TRADE_RPC_URL` | 同 `RPC_URL`（公共节点 / NodeReal 除外） | 下单链路专用节点（可多个，逗号分隔），公共节点兜底 |
+| `WSS_URL` | （空） | 链上订阅（新盘、成交推送）的备用 WebSocket 节点，可填多个（逗号分隔），排在 NodeReal 之后、PublicNode 之前；例如 Dwellir 免费档（只能订阅，不支持 eth_getLogs）。key 在页面和日志里打码 |
 | `FOUR_LOG_RPC` | 有 `NODEREAL_RPC` 用它，否则 `https://bsc-rpc.publicnode.com` | 扫 Four 事件用的 RPC（getLogs） |
 | `FOUR_LOG_STEP` | NodeReal `49000` / 公共节点 `5000` | 每次 getLogs 查多少块 |
 | `FOUR_BACKFILL_BLOCKS` | `150000` | 启动时往回扫多少个区块的 Four 新盘 |
@@ -116,7 +133,9 @@ scripts/add-wallet.sh --peers --write-env         # 写进 .env 的 WALLET_PEERS
 | `AUTH_SIMULATE_LOGGED_OUT` | `0` | 调试：假装未登录 |
 | `DATA_DIR` | `data/` | 数据目录（多钱包时每个后端各用一个） |
 | `WALLET_SLOT` / `WALLET_PEERS` | `1` / `[]` | 多钱包：本后端是第几个钱包 / 一起下单的其他钱包后端 |
-| `WALLET_ADDRESS` | （空） | 本后端只允许这个钱包地址；baw 登录成别的账号时拒绝使用（防止拿错账号下单 / 自动转出） |
+| `WALLET_ADDRESS` | （空） | 本后端只允许这个钱包地址；baw 登录成别的账号时拒绝使用（防止拿错账号下单） |
+| `MYSQL_URL` | （空） | 可选：历史数据缓存的 MySQL，如 `mysql://tmtn:密码@127.0.0.1:13306/tmtn`（只放 `.env`），见 [docs/cache.md](docs/cache.md) |
+| `REDIS_URL` | （空） | 可选：接口短时缓存的 Redis，如 `redis://127.0.0.1:16379` |
 | `FEEDS_PUBLIC` | `0` | `1` = 行情订阅只用公共节点（第二个钱包的后端用，省 NodeReal 额度） |
 | `NAME_RPC` | publicnode / bnbchain（逗号分隔） | 解析 `.ai` 域名用的 RPC |
 | `BSC_TESTNET_RPC` | `https://data-seed-prebsc-1-s1.bnbchain.org:8545` | 测试网 RPC（模拟 / 测试网钱包用） |
@@ -127,15 +146,14 @@ scripts/add-wallet.sh --peers --write-env         # 写进 .env 的 WALLET_PEERS
 
 | 文件 | 内容 |
 |---|---|
-| `live-settings.json` | 页面设置：单笔上限、自动领取、自动转出开关、快捷买入金额、一键买卖预设、预先授权开关等 |
+| `live-settings.json` | 页面设置：单笔上限、自动领取、快捷买入金额、一键买卖预设、预先授权开关等 |
 | `positions.json` | 本程序记录的持仓与成本 |
 | `latency.jsonl` | 每笔订单的耗时记录 |
-| `tokenRules.json` | 单币规则（发射后领取 / 转出）及执行记录（含交易哈希） |
+| `tokenRules.json` | 单币规则（发射后立刻领取）及执行记录（含交易哈希） |
 | `approvals.json` | 本程序授过的额度（代币 → 合约） |
 | `favorites.json` / `blocklist.json` | 收藏、屏蔽列表 |
 | `names.json` | 地址 → `.ai` 域名缓存 |
 | `fourTokens.json` / `flapCreated.json` | Four / Flap 代币登记（重启后恢复列表用） |
-| `transferWatch.json` | 转出监控记录 |
 | `img/` | 代币头像缓存 |
 | `testnet-wallet.json` | 模拟 / 测试网用的一次性钱包（**含私钥，仅测试网**） |
 
@@ -156,11 +174,11 @@ engine/
     gangChain.js     gang.fun 新盘：监听链上创建事件（WSS 订阅 + getLogs 补查），比接口轮询快
     flapChain.js     Flap Agent 曲线：订阅链上成交 / 新市场事件（代替第三方 shrine 推送）
     portal.js        Flap Portal 买 / 卖 / 领取、发交易并等回执
-    liveTrader.js    下单流程、自动领取、单币规则 / 自动转出、计价币换回 BNB、授权管理
+    liveTrader.js    下单流程、自动领取、单币规则、计价币换回 BNB、授权管理
     holdings.js      持仓与盈亏（钱包历史、历史 BNB 价格、链上卖出报价核对）
     approvals.js     预先授权策略
     latency.js       耗时记录
-    meta.js names.js transferWatch.js
+    meta.js names.js
 public/              页面（index.html、app.js、style.css、vendor/lightweight-charts）
 scripts/             只读的辅助脚本（耗时报表、测试网信息、监听 Four 新币）
 ```
@@ -176,7 +194,7 @@ scripts/             只读的辅助脚本（耗时报表、测试网信息、�
 ```bash
 git clone <本仓库地址> tmtn && cd tmtn
 npm install
-cp .env.example .env            # 需要的话在 .env 里填 NODEREAL_RPC、AUTO_TRANSFER_TO 等；key 只放这里
+cp .env.example .env            # 需要的话在 .env 里填 NODEREAL_RPC 等；key 只放这里
 npm i -g @binance/agentic-wallet
 baw auth signin                 # 终端会给出链接 / 二维码，由你本人在币安 App 里确认
 npx skills add binance/binance-skills-hub --skill binance-agentic-wallet   # 交易 Four 专属模板需要
@@ -239,11 +257,11 @@ curl -s -X POST http://127.0.0.1:8788/api/order -H 'content-type: application/js
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/api/holdings`（`?refresh=1` 强制重读） | 持仓快照：每个币的数量、市值、成本、已卖出、盈亏（BNB / 美元） |
-| POST | `/api/settings` | 改设置：`maxTradeBnb`、`autoClaim`、`sellToBnb`、`preApproveCap`、三个自动转出开关、一键买卖预设等 |
+| POST | `/api/settings` | 改设置：`maxTradeBnb`、`autoClaim`、`sellToBnb`、`preApproveCap`、一键买卖预设等 |
 | POST | `/api/config` | 改快捷买入金额等（`quickBuy`）；自动买入已移除，不能打开 |
 | GET/POST | `/api/favorites` | 收藏；POST `{ op: "set"|"remove"|"addGroup"|"renameGroup"|"deleteGroup", … }` |
 | GET/POST | `/api/blocklist` | 屏蔽；POST `{ kind: "token"|"dev", address, on, label }` |
-| GET/POST | `/api/token-rules` | 单币规则（发射后领取 / 转出） |
+| GET/POST | `/api/token-rules` | 单币规则（发射后立刻领取） |
 | GET | `/api/approvals`；POST `/api/approvals/revoke` | 授权列表；撤销 `{ token, spender }`（会发一笔交易） |
 | GET | `/api/latency-stats?days=1` | 下单耗时统计（按平台 / 方向，p50 / p90、各步骤平均） |
 | POST | `/api/auth/check`、`/api/auth/login` | 查 / 发起币安钱包登录 |
@@ -252,7 +270,7 @@ curl -s -X POST http://127.0.0.1:8788/api/order -H 'content-type: application/js
 **WebSocket**：连 `ws://127.0.0.1:<PORT>/ws`。
 
 - 发送 `{"type":"sub","token":"0x…"}` 订阅一个币，会收到它的 `detail`（`full: true` 是全量，之后是增量 K 线和成交）。
-- 服务器推送的消息类型：`tick`（定时全量：代币列表、钱包、持仓、网络状态）、`launch`（新盘）、`trade`（全市场成交）、`detail`、`order`（订单状态变化）、`holdings`（持仓快照）、`settings`、`config`、`favorites`、`blocklist`、`rules`、`autoTransfer`、`log`、`record`。
+- 服务器推送的消息类型：`tick`（定时全量：代币列表、钱包、持仓、网络状态）、`launch`（新盘）、`trade`（全市场成交）、`detail`、`order`（订单状态变化）、`holdings`（持仓快照）、`settings`、`config`、`favorites`、`blocklist`、`rules`、`log`、`record`。
 
 ### 3. 建议的 Agent 工作流
 
@@ -267,8 +285,8 @@ curl -s -X POST http://127.0.0.1:8788/api/order -H 'content-type: application/js
 - 服务**只监听 127.0.0.1**，而且**没有任何鉴权**：谁能访问这个端口，谁就能用你的钱包下单。**绝对不要**把它暴露到公网，也不要做端口转发 / 反向代理。
 - 开发和调试时用模拟盘（`MODE=sim`）或 `LIVE_TRADE=0`（只报价）。
 - 设好单笔上限（`MAX_TRADE_BNB` 或页面里的设置），AI 下的单也受它限制。
-- 自动转出、预先授权默认都是关的，只有你自己在页面上打开才生效；AI 不应该替你打开。
-- RPC key、自动转出地址等只放 `.env`，不要写进代码、日志或聊天。
+- 预先授权默认是关的，只有你自己在页面上打开才生效；AI 不应该替你打开。
+- RPC key 等只放 `.env`，不要写进代码、日志或聊天。
 
 ## 用到的主要合约（BSC 主网）
 

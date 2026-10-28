@@ -4,25 +4,65 @@
 import * as baw from './baw.js';
 import { QUOTE_TOKENS } from './config.js';
 import { ethers } from 'ethers';
+import { cache } from './cache.js';
+import { portalSpent } from './flapNft.js';
 
 const HIST_MS = 60_000;
 const lc = (a) => String(a || '').toLowerCase();
 const BNB = '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee';
 const WBNB = lc(QUOTE_TOKENS.WBNB);
+// 一笔钱包交易的唯一键：它的链上交易哈希（没有就用时间 + 内容）
+const txId = (t) => (t.txHashList || []).map((h) => h.txHash).filter(Boolean).join(',') || t.id || `${t.txTime}:${JSON.stringify(t).length}`;
 
 export class Holdings {
-  constructor(market, trader) { this.market = market; this.trader = trader; this.hist = new Map(); this.histAt = 0; this.loading = null; this.swaps = new Map(); this.checks = new Map(); this.bnbH = new Map(); }
+  constructor(market, trader) { this.market = market; this.trader = trader; this.hist = new Map(); this.histAt = 0; this.loading = null; this.swaps = new Map(); this.checks = new Map(); this.bnbH = new Map(); this.rcpt = new Map(); this.decs = new Map(); this.pfix = new Map(); }
+
+  // 刚成交、钱包历史（baw tx-history）还没收录的本程序订单：先按订单 + 链上回执（代币 Transfer）记一笔，历史里有了就以历史为准
+  // （同一笔交易哈希，或同方向、时间差 2 分钟内的成交）。以前要等 baw 索引 + 60 秒重读，成交列表和成本常常晚一两分钟
+  async recentOwnTrades() {
+    const w = lc(this.trader.wallets?.[0]?.address); if (!w) return new Map();
+    const T = ethers.id('Transfer(address,address,uint256)'), prov = this.market.provider, out = new Map();
+    for (const o of this.trader.orders || []) {
+      if (o.status !== 'filled' || o.dryRun || !['buy', 'sell'].includes(o.side) || !o.token || Date.now() - (o.ts || 0) > 6 * 3600_000) continue;   // 6 小时：baw 有时半小时以上才收录 Flap Portal 买入；历史里有了就跳过
+      const tok = lc(o.token), hs = [...new Set([...(o.txs || []), o.tx].filter((h) => /^0x[0-9a-f]{64}$/i.test(h || '')))];
+      if (this.hist.get(tok)?.trades.some((y) => hs.includes(y.tx))) continue;   // 历史里已经有了，不用再读回执
+      let tokens = 0, tx = null;
+      for (const h of hs) {
+        let r = this.rcpt.get(h);
+        if (r === undefined) { r = await prov.getTransactionReceipt(h).catch(() => null); if (r) this.rcpt.set(h, r); }   // 还没上链 / 读失败：下次再读
+        if (!r || r.status !== 1) continue;
+        for (const l of r.logs || []) {
+          if (lc(l.address) !== tok || l.topics?.[0] !== T || l.topics.length < 3) continue;
+          const from = lc('0x' + l.topics[1].slice(26)), to = lc('0x' + l.topics[2].slice(26));
+          if (o.side === 'buy' ? to !== w : from !== w) continue;
+          if (!this.decs.has(tok)) this.decs.set(tok, await new ethers.Contract(tok, ['function decimals() view returns (uint8)'], prov).decimals().then(Number).catch(() => 18));
+          tokens += Number(ethers.formatUnits(BigInt(l.data), this.decs.get(tok))); tx = h;
+        }
+      }
+      if (!tokens && o.side === 'buy' && o.out > 0) tokens = o.out;   // 回执里没读到（比如还在确认）：用订单的预计数量
+      if (!tokens) continue;   // 卖出没读到代币转出（App 确认的那笔不在 txs 里）：只能等钱包历史
+      const bnbFlap = o.side === 'buy' && o.platform === 'flap' && !this.market.get(o.token)?.quoteAddress, sent = Number(o.amountIn ?? o.amount) || 0;
+      const ps = bnbFlap ? hs.map((h) => portalSpent(this.rcpt.get(h), w, sent)).find((v) => v != null) : null;   // Flap BNB 盘买入：按回执里 Portal 记的实际花费（超过 2% 上限多给的会退回）
+      const bnb = o.side === 'buy' ? ps ?? sent : Number(o.out) || 0, ts = o.ts;
+      (out.get(tok) || out.set(tok, []).get(tok)).push({ side: o.side, ts, tokens, bnb, usd: bnb * this.usdAt(ts), quoteAmt: null, quote: null, tx: tx || hs.at(-1) || null, txs: hs, pending: true });
+    }
+    for (const h of this.rcpt.keys()) if (this.rcpt.size > 200) this.rcpt.delete(h); else break;
+    return out;
+  }
 
   // 历史 BNB/USDT 价格：币安 1 小时 K 线（每根取开盘和收盘的平均），用来把每笔成交的 BNB 折成当时的美元
   async loadBnbHourly(fromMs) {
     const H = 3600_000; let start = Math.floor(fromMs / H) * H; const end = Date.now();
+    if (!this.bnbHDb) { const rows = await cache.loadBnbHourly(start).catch(() => null); if (rows) { this.bnbHDb = true; for (const [h, px] of rows) this.bnbH.set(h, px); } }   // MySQL 缓存：存过的小时价不再请求币安
+    const fresh = [];
     while (start < end) {
       if (this.bnbH.has(start) && start < end - 2 * H) { start += H; continue; }
       const j = await (await fetch(`https://api.binance.com/api/v3/klines?symbol=BNBUSDT&interval=1h&startTime=${start}&limit=1000`)).json();
       if (!Array.isArray(j) || !j.length) break;
-      for (const k of j) this.bnbH.set(k[0], (Number(k[1]) + Number(k[4])) / 2);
+      for (const k of j) { const px = (Number(k[1]) + Number(k[4])) / 2; this.bnbH.set(k[0], px); if (k[0] < end - 2 * H) fresh.push([k[0], px]); }   // 最近 2 小时的还会变，不存
       start = j.at(-1)[0] + H;
     }
+    if (this.bnbHDb && fresh.length) cache.saveBnbHourly(fresh).catch(() => {});
   }
   usdAt(ts) { const v = this.bnbH.get(Math.floor(ts / 3600_000) * 3600_000); return v || this.market.bnbUsd || 0; }
 
@@ -41,11 +81,20 @@ export class Holdings {
     if (!force && Date.now() - this.histAt < HIST_MS) return;
     if (this.loading) return this.loading;
     this.loading = (async () => {
-      const txs = []; let cursor = null;
+      // MySQL 缓存：钱包交易记录存下来，之后只翻到碰上已存的、已确认的那笔为止（通常 1 页），不再每次翻 5 页
+      const wallet = this.trader.wallets?.[0]?.address; const stored = wallet ? await cache.loadWalletTx(wallet, 500).catch(() => null) : null;
+      const known = new Set((stored || []).filter((t) => t.status === 'confirmed').map(txId));
+      let txs = []; let cursor = null;
       for (let i = 0; i < 5; i++) {
         const args = ['wallet', 'tx-history', '--binanceChainId', '56', '--size', '100']; if (cursor) args.push('--nextCursor', cursor);
         const d = (await baw.runBaw(args, { timeoutMs: 30_000 })).data || {};
         txs.push(...(d.transactions || [])); cursor = d.nextCursor; if (!cursor || !(d.transactions || []).length) break;
+        if (known.size && (d.transactions || []).some((t) => known.has(txId(t)))) break;   // 接上已存的了
+      }
+      if (stored) {
+        cache.saveWalletTx(wallet, txs, txId).catch(() => {});
+        const m = new Map(stored.map((t) => [txId(t), t])); for (const t of txs) m.set(txId(t), t);
+        txs = [...m.values()].sort((a, b) => (Date.parse(b.txTime) || 0) - (Date.parse(a.txTime) || 0)).slice(0, 500);   // 和以前一样最多最近 500 笔
       }
       const minTs = Math.min(...txs.map((t) => Date.parse(t.txTime)).filter(Number.isFinite));
       if (isFinite(minTs)) await this.loadBnbHourly(minTs).catch(() => {});   // 拿不到就用现价
@@ -79,14 +128,19 @@ export class Holdings {
             const px = this.usdAt(ts);
             if (got > 0) {
               const o = other(out); let v = o.bnb;
+              // Flap 盘用 BNB 买：Portal 会在同一笔里退回超过 2% 上限的部分，钱包历史可能记的是发出去的全部 BNB。按回执里 Portal 记的实际花费改（每笔只读一次）
+              const ft = this.market.get(tok); if (out[BNB] > 0 && h.txHash && ft?.platform === 'flap' && !ft.quoteAddress) {   // 只看 BNB 盘：报价币盘事件里是报价币数量
+                if (!this.pfix.has(h.txHash)) this.pfix.set(h.txHash, await this.market.provider.getTransactionReceipt(h.txHash).then((rc) => (rc ? portalSpent(rc, wallet, out[BNB]) : undefined)).catch(() => undefined));
+                const ps = this.pfix.get(h.txHash); if (ps === undefined) this.pfix.delete(h.txHash); else if (ps != null && ps < out[BNB]) v = v - out[BNB] + ps;
+              }
               if (!v && qs.has(tok) && Object.keys(out).length) v = got * this.rateAt(tok, ts);   // 卖别的币换回报价币：按当时汇率记成本；单纯转入不算成本
               r.buys++; r.boughtBnb += v; r.boughtUsd += v * px; r.boughtQty += got; if (o.qAmt) { r.boughtQuote += o.qAmt; r.quote = o.qAddr; }
-              r.trades.push({ side: 'buy', ts, tokens: got, bnb: v, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
+              r.trades.push({ side: 'buy', ts, tokens: got, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
             } else if (sent > 0) {
               const o = other(inn); let v = o.bnb;
               if (!v && qs.has(tok)) v = sent * this.rateAt(tok, ts);   // 报价币拿去买了别的币：按当时汇率记作转出价值
               r.sells++; r.soldBnb += v; r.soldUsd += v * px;
-              r.trades.push({ side: 'sell', ts, tokens: sent, bnb: v, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
+              r.trades.push({ side: 'sell', ts, tokens: sent, bnb: v, usd: v * px, quoteAmt: o.qAmt || null, quote: o.qAddr, tx: h.txHash });
             } else continue;
             r.fees += fee; r.feesUsd += fee * px; r.firstAt = Math.min(r.firstAt, ts); m.set(tok, r);
           }
@@ -112,6 +166,23 @@ export class Holdings {
   async view() {
     const sig = this.trader.positionsView().map((p) => `${p.token}:${Math.round(p.amount)}`).join(',');
     await this.loadHistory(sig !== this.sig).catch(() => {}); this.sig = sig;   // 持仓有变化（新买卖）就马上重读钱包历史，成本跟上
+    // 本程序刚成交、钱包历史还没有的：先补进来；还有没收录的就每 10 秒重读一次历史（平时 60 秒）
+    const own = await this.recentOwnTrades().catch(() => new Map()), extra = new Map();
+    for (const [tok, list] of own) {
+      const h0 = this.hist.get(tok), seen = h0?.trades || [];
+      const add = list.filter((x) => !seen.some((y) => (y.tx && x.txs.includes(y.tx)) || (y.side === x.side && Math.abs(y.ts - x.ts) < 120_000)));
+      if (!add.length) continue;
+      // 有钱包历史：成本 / 卖出一起加上；没有历史的币本来就用订单记录（p.boughtBnb）算成本，只补成交列表
+      const h = h0 ? { ...h0, trades: [...seen] } : { trades: [], appOnly: true };
+      for (const x of add) {
+        h.trades.push(x);
+        if (h.appOnly) continue;
+        if (x.side === 'buy') { h.buys++; h.boughtBnb += x.bnb; h.boughtUsd += x.usd; h.boughtQty += x.tokens; } else { h.sells++; h.soldBnb += x.bnb; h.soldUsd += x.usd; }
+        h.firstAt = Math.min(h.firstAt, x.ts);
+      }
+      extra.set(tok, h);
+    }
+    if (extra.size && Date.now() - this.histAt > 10_000) this.loadHistory(true).catch(() => {});   // 后台重读，不挡这次刷新
     const w = this.trader.wallets[0]; const bnbUsd = this.market.bnbUsd;
     const claim = new Map((this.trader.claimable || []).map((c) => [lc(c.token), c]));
     const rows = [];
@@ -119,13 +190,16 @@ export class Holdings {
       const t = this.market.get(p.token); if (!t) continue;
       // Gang V2/V3 内盘还没价格（没进接口列表、没人点开过，XAUt 等非 18 位报价币常见）：按链上曲线补一次
       if (p.amount > 0 && !(t.price > 0) && t.source === 'gang' && (t.gangTrack === 'v2' || t.gangTrack === 'v3')) await this.market.gangV2Curve?.(t).catch(() => {});
-      const h = this.hist.get(lc(p.token));
+      const hx = extra.get(lc(p.token)), h = hx && !hx.appOnly ? hx : this.hist.get(lc(p.token));
       // 有钱包历史就用历史（包括别处买的）；没有就用本程序的订单记录
-      const bought = h ? h.boughtBnb : p.boughtBnb || 0, sold = h ? h.soldBnb : p.soldBnb || 0, fees = h ? h.fees : 0;
+      // 钱包历史漏了买入（baw 还没收录 / 只收录了几笔里的一部分，订单补记也过了时间窗）：本程序记的买入明显更多时用本程序的，否则成本只剩手续费、盈亏变成几百万 %
+      const appBuy = !!h && p.boughtBnb > 0 && (!h.buys || (t.platform === 'flap' && p.boughtBnb > h.boughtBnb * 1.05 + 1e-6));   // 部分漏收只看 Flap（baw 收录 Portal 买入慢）；Gang 等的旧订单记录可能偏大，不拿来覆盖历史
+      const bought = appBuy ? p.boughtBnb : h ? h.boughtBnb : p.boughtBnb || 0, sold = h ? h.soldBnb : p.soldBnb || 0, fees = h ? h.fees : 0;
+      const costUsd = appBuy ? p.boughtBnb * bnbUsd + h.feesUsd : h ? h.boughtUsd + h.feesUsd : (bought + fees) * bnbUsd;
       // 价格以报价币计（GANG、BNCB…），折成 BNB：× 报价币/BNB 汇率（和行情同一来源）
       const isBnbQuote = !t.quote || ['BNB', 'WBNB'].includes(String(t.quote).toUpperCase());
       const rate = isBnbQuote ? 1 : (bnbUsd ? (this.market.quoteUsd?.(t) || 0) / bnbUsd : 0);
-      let value = rate && t.price > 0 ? p.amount * t.price * rate : null, warn = rate ? null : `${t.quote} 对 BNB 的价格暂时拿不到，市值不显示`;
+      let value = !(p.amount > 0) ? 0 : rate && t.price > 0 ? p.amount * t.price * rate : null,   /* 已清仓：没价格也是 0，盈亏 = 已卖出 − 成本 */ warn = rate ? null : `${t.quote} 对 BNB 的价格暂时拿不到，市值不显示`;
       // 校验：Gang V2 盘按链上 quoteSell（全部持仓）× 汇率核对，差 50% 以上或数值离谱就不显示，免得给出错误数字
       const chk = p.amount > 0 && this.trader.useGangV2?.(t) ? await this.sellCheck(t, rate) : null;
       if (value != null && chk?.bnb != null && Math.abs(value - chk.bnb) > 0.5 * Math.max(chk.bnb, 1e-12)) { warn = `按价格算 ${value.toFixed(4)} BNB，和链上卖出报价 ${chk.bnb.toFixed(4)} BNB 差太多，暂不显示`; value = null; }
@@ -146,15 +220,15 @@ export class Holdings {
         avgBuyUsd: h?.boughtQty ? h.boughtUsd / h.boughtQty : (p.amount > 0 && bought ? (bought * bnbUsd) / p.amount : null),
         pnlBnb: value != null ? value + sold - cost : null, pnlPct: value != null && cost > 0 ? ((value + sold - cost) / cost) * 100 : null,
         // 美元：市值按现在的 BNB 价；成本 / 卖出按每笔成交当时的 BNB 价（钱包历史里有的），本程序订单记录只能按现价
-        costUsd: h ? h.boughtUsd + h.feesUsd : cost * bnbUsd, soldUsd: h ? h.soldUsd : sold * bnbUsd, usdBasis: h ? 'trade' : 'current',
-        pnlUsd: value != null ? value * bnbUsd + (h ? h.soldUsd : sold * bnbUsd) - (h ? h.boughtUsd + h.feesUsd : cost * bnbUsd) : null,
+        costUsd, soldUsd: h ? h.soldUsd : sold * bnbUsd, usdBasis: h && !appBuy ? 'trade' : 'current',
+        pnlUsd: value != null ? value * bnbUsd + (h ? h.soldUsd : sold * bnbUsd) - costUsd : null,
         firstAt: h && isFinite(h.firstAt) ? h.firstAt : p.openedAt || null, source: h ? 'wallet' : 'app',
         // 这个币同时是别的盘的报价币（如 GANG）：Gang V2 / Flap 买卖中间换出来的那部分也在这里，标出来方便换回 BNB
         isQuote: Object.keys(this.market.qUsd || {}).includes(lc(p.token)),
-        trades: h ? h.trades.sort((a, b) => b.ts - a.ts).slice(0, 30) : [],
+        trades: (hx || h)?.trades ? [...(hx || h).trades].sort((a, b) => b.ts - a.ts).slice(0, 30) : [],
       });
     }
-    rows.sort((a, b) => b.valueBnb - a.valueBnb || (b.firstAt || 0) - (a.firstAt || 0));
+    rows.sort((a, b) => (b.valueBnb || 0) - (a.valueBnb || 0) || (b.firstAt || 0) - (a.firstAt || 0));   // valueBnb 为 null 时以前比较出 NaN，排序顺序不稳定
     const open = rows.filter((r) => r.amount > 0);
     const tot = (k, list = rows) => list.reduce((a, r) => a + (r[k] || 0), 0);   // 不显示的（null）按 0 计
     return {

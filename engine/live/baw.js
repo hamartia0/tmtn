@@ -2,7 +2,7 @@
 // execFile 不经过 shell，参数逐个传入，地址都先校验。
 import { execFile } from 'node:child_process';
 import { ethers } from 'ethers';
-import { BAW_BIN, BINANCE_CHAIN_ID, BAW_SLIPPAGE_UNIT, DRY_RUN, AUTO_TRANSFER_TO } from './config.js';
+import { BAW_BIN, BINANCE_CHAIN_ID, BAW_SLIPPAGE_UNIT, DRY_RUN } from './config.js';
 import { assertLiquid, isQuoteToken } from './quoteRoutes.js';
 
 export function assertAddress(a, name = 'address') {
@@ -17,7 +17,30 @@ function formatErr(parsed, fallback) {
   return e ? `${e.name || e.code || 'baw_error'}: ${e.message || ''}`.trim() : fallback;
 }
 
-export function runBaw(args, { timeoutMs = 90_000, onChild } = {}) {
+// 不同版本的 baw 支持的参数不一样（比如 1.11.0 的 wallet balance 没有 --hideLowValue，1.12.0 才有）。
+// baw 报「unknown option '--X'」时去掉这个参数（连同它的值）重试一次，并记住，之后不再传。参数解析失败时 baw 什么都没做，重试是安全的。
+const unsupportedFlags = new Set();
+const stripFlags = (args) => {
+  const out = [];
+  for (let i = 0; i < args.length; i++) {
+    if (unsupportedFlags.has(args[i])) { if (i + 1 < args.length && !String(args[i + 1]).startsWith('--')) i++; continue; }
+    out.push(args[i]);
+  }
+  return out;
+};
+
+export async function runBaw(args, opts = {}) {
+  try { return await runBawOnce(stripFlags(args), opts); }
+  catch (e) {
+    const flag = /unknown option '(--[A-Za-z][\w-]*)'/.exec(e.message)?.[1];
+    if (!flag || unsupportedFlags.has(flag) || !args.includes(flag)) throw e;
+    unsupportedFlags.add(flag);
+    console.warn(`[baw] 当前 baw 不支持 ${flag}，已去掉这个参数重试`);
+    return runBawOnce(stripFlags(args), opts);
+  }
+}
+
+function runBawOnce(args, { timeoutMs = 90_000, onChild } = {}) {
   return new Promise((resolve, reject) => {
     const child = execFile(BAW_BIN, ['--json', ...args], { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: process.env }, (err, stdout, stderr) => {
       const text = String(stdout || '').trim();
@@ -88,7 +111,7 @@ export async function contractCall({ from, to, valueWei = '0', inputData }) {
   return { ...pre, dryRun: false, orderId: ex.orderId, status: ex.status, txHash: ex.txHash || null, message: ex.message || null };
 }
 
-const DEEP = new Set(['0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', '0x55d398326f99059ff775485246999027b3197955', '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', '0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d']);   // BNB、WBNB、USDT、USDC、USD1
+const DEEP = new Set(['0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee', '0xbb4cdb9cbd36b01bd1cbaebf2de08d9173bc095c', '0x55d398326f99059ff775485246999027b3197955', '0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d', '0x8d0d000ee44948fc98c9b98a4fa4921476f08b0d', '0x7ddef360f3c2db4cc41c3967984fefa2598cc9a6']);   // BNB、WBNB、USDT、USDC、USD1、xOPAI（深度在 PancakeSwap Infinity 的 USDT/xOPAI 池，DexScreener 没收录、只看到 $0.07 的 V2 池，按它判断会误拒）
 export async function marketSwap({ fromTokenQty, fromToken, toToken, slippage, mev = false, gasLevel = 'HIGH' }) {
   // 计价币兑换前检查流动性：最深的池子太小（低于 QUOTE_MIN_LIQ_USD，默认 $20,000）就拒绝，避免在小池子里吃大滑点。BNB / WBNB / 主流稳定币不查；
   // 普通代币（发射后在外盘买卖的持仓）也不查——以前对所有代币都查，外盘池子小于 2 万美元、或 DexScreener 还没收录的币会被拒绝卖出
@@ -112,13 +135,4 @@ export async function pollOrder(orderId, { maxMs = 60_000, intervalMs = 250 } = 
     await new Promise((r) => setTimeout(r, intervalMs));
   }
   return last;
-}
-
-// 代币转账：baw wallet send --max（转出全部余额）
-export async function sendMax({ tokenAddress, recipient, gasLevel = 'MEDIUM' }) {
-  // 最后一道闸：只报价模式（LIVE_TRADE=0）一律不转；收款地址只能是服务器配置的 AUTO_TRANSFER_TO
-  if (DRY_RUN) throw new Error('当前是只报价模式（LIVE_TRADE=0），不会转出');
-  if (String(recipient || '').toLowerCase() !== String(AUTO_TRANSFER_TO || '').toLowerCase()) throw new Error('收款地址不是服务器配置的 AUTO_TRANSFER_TO，已拒绝转出');
-  const args = ['wallet', 'send', '--binanceChainId', String(BINANCE_CHAIN_ID), '--max', '--tokenAddress', assertAddress(tokenAddress, 'tokenAddress'), '--recipient', assertAddress(recipient, 'recipient'), '--gasLevel', gasLevel];
-  return (await runBaw(args, { timeoutMs: 90_000 })).data || {};
 }

@@ -7,26 +7,24 @@
 <link rel="icon" type="image/svg+xml" href="logo.svg?v=2" />
 <link rel="icon" type="image/png" sizes="32x32" href="logo-32.png?v=2" />
 <link rel="apple-touch-icon" href="logo-96.png?v=2" />
-<link rel="stylesheet" href="style.css?v=1793083721" />
+<link rel="stylesheet" href="style.css?v=1793164423" />
+<link rel="stylesheet" href="version.css?v=1" />
+<link rel="stylesheet" href="theme.css?v=3" />
+<script src="theme.js?v=1"></script>
 </head>
 <body>
 <header class="topbar">
   <div class="brand" id="brand" role="link" tabindex="0" title="进入战壕">
     <img class="brand-logo" src="logo.svg?v=2" width="30" height="30" alt="TMTN" />
-    <div><div class="brand-t">TMTN <span class="brand-v">v2.5</span></div><div class="brand-s">CURVE TERMINAL</div></div>
+    <div><div class="brand-t">TMTN <span class="brand-v">v3.98</span></div><div class="brand-s">CURVE TERMINAL</div></div>
   </div>
   <label class="search">
     <svg viewBox="0 0 24 24" width="14" height="14"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-4-4" stroke="currentColor" stroke-width="2"/></svg>
-    <input id="search" placeholder="粘贴 Market 地址打开市场 / 搜索名称、符号" autocomplete="off" />
+    <input id="search" placeholder="粘贴 Market 地址打开市场 / 搜索名称、符号 / 钱包地址查 .ai 域名" autocomplete="off" />
     <kbd>/</kbd>
     <div id="searchResults" class="search-results hidden"></div>
   </label>
-  <div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div>
-  <div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div>
-  <div class="pill mono muted" id="blockNo">#—</div>
-  <div class="pill mono muted" id="bnbPx">BNB —</div>
   <div class="pill" id="modeBadge">连接中…</div>
-  <button class="pill as-pill hidden" id="autoSendPill" data-autosend title="自动转出设置"></button>
   <div class="authpill hidden" id="authPill"><i></i><span></span></div>
   <button class="pill fav-tg" id="favToggle" title="收藏栏（显示 / 隐藏）">⭐</button>
   <div class="viewsw" id="viewSw"><button data-view="trade" class="active">交易</button><button data-view="pulse">战壕</button><button data-view="hold">持仓</button><button data-view="track">追踪</button><button data-view="snipe">狙击</button></div>
@@ -49,14 +47,9 @@
       <i class="dot g"></i><b class="lh-t" title="Binance Agent 专属"><span class="lf">Binance </span>Agent 专属</b><span class="cnt" id="agentCnt">0</span>
       <div class="lctrl">
         <label class="qbuy" title="⚡ 快捷买入金额：列表和卡片上的 ⚡ 按钮每次买这么多 BNB。直接改，回车或点别处即保存"><span class="y">⚡</span><input id="quickBuy" class="mono" value="0.1" inputmode="decimal" /><span class="u">BNB</span></label>
-        <button class="ibtn" id="btnBell" title="新币通知：页面在后台时，当前平台出新币弹系统通知"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>
+        <button class="ibtn" id="btnBell" title="新币通知：页面在后台时，出了符合「新创建」筛选的新币弹系统通知"><svg viewBox="0 0 24 24"><path d="M6 16V11a6 6 0 0 1 12 0v5l1.5 2h-15z"/><path d="M10 20.5a2 2 0 0 0 4 0"/></svg></button>
         <button class="ibtn" id="btnSound" title="声音：出新币「叮咚」、成交提示音（战壕各列的小喇叭单独控制）"><svg viewBox="0 0 24 24"><path d="M4 9.5h3.5L12 6v12l-4.5-3.5H4z"/><path class="w" d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/><path class="x" d="M16 9.5l5 5m0-5l-5 5"/></svg></button>
       </div>
-    </div>
-    <div class="seg plat" id="platTabs">
-      <button data-p="flap"><span class="lf">Flap · Agent 曲线</span><span class="ls">Flap 曲线</span> <i class="badge-n" data-n="flap"></i></button>
-      <button data-p="four" class="active"><span class="lf">Four · Agent 专属</span><span class="ls">Four 专属</span> <i class="badge-n" data-n="four"></i></button>
-      <button data-p="gang">Gang <i class="badge-n" data-n="gang"></i></button>
     </div>
     <div class="agent-status" id="agentStatus"></div>
     <div class="tabs" id="listTabs">
@@ -64,6 +57,7 @@
     </div>
     <div class="chips" id="chips">
       <button data-c="bnb">BNB 池</button><button data-c="other">其他计价</button><button data-c="traded">有成交</button><button data-c="h1">1小时内</button>
+      <button class="lf-funnel" id="listFunnel" title="筛选（和战壕同一套）"><svg viewBox="0 0 16 16" width="14" height="14" style="pointer-events:none"><path d="M2 3h12l-4.6 5.4v4.4l-2.8 1.4V8.4z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg><span>筛选</span></button>
     </div>
     <div class="tlist" id="tokenList"></div>
   </aside>
@@ -89,9 +83,9 @@
     <div class="vsplit" id="vsplit" title="上下拖动调整 K 线高度"></div>
     <div class="panel bottom">
       <div class="tabs btabs" id="bottomTabs">
-        <button data-b="trades" class="active">实时成交</button><button data-b="flow">全市场成交流</button><button data-b="pos">我的持仓</button>
+        <button data-b="pos" class="active">我的持仓</button><button data-b="holders" title="按持仓排名的持有人：总买入、总卖出、利润、买入市值；点一行看这个地址的每一笔买卖">持有人</button><button data-b="allpos" title="所有钱包里的全部持仓，不用离开详情页">所有持仓</button>
         <button data-b="orders">终端订单</button><button data-b="fills">成交记录</button><button data-b="assets">钱包资产</button><button data-b="logs">事件日志</button>
-        <span class="spacer"></span><span class="muted" id="bottomCnt"></span>
+        <span class="spacer"></span><a href="#" data-qbtoggle id="qbToggleBtm" class="bt-qb" title="显示 / 隐藏一键买卖面板">⚡ 一键买卖</a><span class="muted" id="bottomCnt"></span>
       </div>
       <div class="btable" id="bottomBody"></div>
     </div>
@@ -122,7 +116,6 @@
     <label class="tgl" title="卖出 BNCB / GANG / 币股计价的代币后，把这次卖出到账的报价币自动换成 BNB（只换这一笔到账的数量，不动你原有的报价币）"><input type="checkbox" id="sellToBnb" checked /><i></i>卖出后自动换回 BNB</label>
     <label class="tgl" title="需要授权时授一个较大的固定额度（报价币约 2 倍单笔上限、卖出的代币约全部余额，不是无限额），以后的交易就不用再单独授权、快约 4 秒。关掉 = 每次只授权本次数量"><input type="checkbox" id="preApproveCap" checked /><i></i>预先授权（较大固定额度）</label>
     <button class="settings-row" id="openApprovals"><span>🔑 授权管理</span><span class="muted">查看额度 · 撤销</span></button>
-    <button class="settings-row" id="autoSendLink" data-autosend><span>⇢ 自动转出设置</span><span class="muted" id="autoSendSum">—</span></button>
     <button class="settings-row" data-bmgr><span>⊘ 已屏蔽的代币 / 开发者</span><span class="muted">查看 · 取消屏蔽</span></button>
     <button class="settings-row" id="openSettings"><span>⚙ 交易设置</span><span class="muted" id="settingsSummary">自动加速 · 外盘 HIGH · 🎯 自动买</span></button>
 
@@ -131,13 +124,13 @@
   </aside>
 </main>
 <!-- 左侧「钱包追踪」面板（覆盖在页面左边，可拖宽度、可关闭）+ 底部工具栏 -->
-<aside class="panel trk-panel hidden" id="trkPanel"><div class="lh trkp-h"><i class="dot y"></i><b class="lh-t">钱包追踪</b><span class="cnt" id="trkpCount">0</span><div class="lctrl"><button class="apill" id="trkpGo" title="打开追踪页（管理地址、跟单）">管理</button><button class="ibtn" id="trkpClose" title="收起这一栏"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div><div class="trkp-list" id="trkpList"></div><i class="trkp-drag" id="trkpDrag" title="拖动调整宽度"></i></aside>
-<footer class="botbar" id="botbar"><button class="bb-btn" id="bbTrack" title="打开 / 关闭左侧的钱包追踪面板"><span class="bb-ic">👁</span>钱包追踪<i class="bb-n" id="bbTrackN"></i></button><span class="spacer"></span><span class="muted bb-note">TMTN v2.5</span></footer>
+<aside class="panel trk-panel hidden" id="trkPanel"><div class="lh trkp-h"><i class="dot y"></i><b class="lh-t">钱包追踪</b><span class="cnt" id="trkpCount">0</span><div class="lctrl"><input id="trkpMin" class="trkp-min" type="number" step="1" min="0" placeholder="≥ $" title="最小金额（美元）：小于这个金额的成交不显示，和追踪页的「最小金额」是同一个设置"/><button class="apill" id="trkpGo" title="打开追踪页（管理地址、跟单）">管理</button><button class="ibtn" id="trkpClose" title="收起这一栏"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></div></div><div class="trkp-list" id="trkpList"></div><i class="trkp-drag" id="trkpDrag" title="拖动调整宽度"></i></aside>
+<footer class="botbar" id="botbar"><button class="bb-btn" id="bbTrack" title="打开 / 关闭左侧的钱包追踪面板"><span class="bb-ic">👁</span>钱包追踪<i class="bb-n" id="bbTrackN"></i></button><div class="pill"><i class="dot y"></i><span class="muted">WSS</span><b id="wssName">…</b><span class="g mono" id="wssMs"></span></div><div class="pill"><i class="dot g"></i><span class="muted">RPC</span><b id="rpcName">…</b><span class="g mono" id="rpcMs"></span></div><div class="pill mono muted" id="blockNo">#—</div><div class="pill mono muted" id="bnbPx">BNB —</div><div class="pill mono muted" id="gangMc" title="GANG 市值（DexScreener，约每分钟更新）">GANG 市值 —</div><span class="spacer"></span><div class="pill mono net-badge" id="netBadge"></div><a class="bb-btn" id="latencyLink" href="latency.html" target="_blank" rel="noopener" style="text-decoration:none" title="下单耗时：每笔买卖从点击到上链花了多久，卡在哪一步"><span class="bb-ic">⏱</span>下单耗时</a><button class="bb-btn vm-btn" id="vmBtn" title="版本管理">TMTN v3.5</button><div class="vm-pop hidden" id="vmPop"></div></footer>
 <section class="track hidden" id="track">
   <div class="trk-top"><div class="trk-tabs"><button data-trtab="feed" class="on">追踪动态</button><button data-trtab="copy">跟单</button></div><span class="spacer"></span>
     <span class="muted trk-note">只追踪 Flap / Four / Gang V2 内盘成交（链上订阅）</span><button class="trk-kill" id="trkKill" title="一键暂停所有跟单任务">全部暂停</button></div>
-  <div class="trk-body" id="trkFeedView"><aside class="trk-side"><div class="trk-add"><input id="trkAddr" placeholder="域名（xxx.ai / xxx.bnb）或 0x 地址" autocomplete="off"/><input id="trkName" placeholder="备注名（可选）"/><div class="trk-row"><input id="trkGroup" placeholder="分组（默认）" list="trkGroups"/><datalist id="trkGroups"></datalist><button id="trkAddBtn">添加追踪</button></div><div class="trk-msg" id="trkMsg"></div></div><div class="trk-list" id="trkList"></div></aside>
-    <div class="trk-main"><div class="trk-filter"><select id="trkFGroup"><option value="">全部分组</option></select><label>最小金额 <input id="trkFMin" type="number" step="0.01" min="0" placeholder="BNB"/></label><label class="trk-chk"><input type="checkbox" id="trkSound"/> 提示音</label><span class="spacer"></span><span class="muted" id="trkCount"></span></div><div class="trk-feed" id="trkFeed"></div></div></div>
+  <div class="trk-body" id="trkFeedView"><aside class="trk-side"><div class="trk-add"><input id="trkAddr" placeholder="域名（xxx.ai / xxx.bnb）或 0x 地址" autocomplete="off"/><input id="trkName" placeholder="备注名（可选）"/><div class="trk-row"><input id="trkGroup" placeholder="分组（默认）" list="trkGroups"/><datalist id="trkGroups"></datalist><button id="trkLookBtn" title="按地址查 .ai / .bnb 域名，并写备注（不追踪也能备注）">查域名</button><button id="trkAddBtn">添加追踪</button></div><div class="trk-msg" id="trkMsg"></div></div><div class="trk-list" id="trkList"></div></aside>
+    <div class="trk-main"><div class="trk-filter"><select id="trkFGroup"><option value="">全部分组</option></select><label>最小金额 <input id="trkFMin" type="number" step="1" min="0" placeholder="$"/></label><label class="trk-chk"><input type="checkbox" id="trkSound"/> 提示音</label><span class="spacer"></span><span class="muted" id="trkCount"></span></div><div class="trk-feed" id="trkFeed"></div></div></div>
   <div class="trk-body hidden" id="trkCopyView"><div class="trk-copy"><div class="trk-filter"><div class="trk-tabs sm"><button data-cptab="active" class="on">活跃</button><button data-cptab="history">历史</button></div><span class="spacer"></span><button class="trk-new" id="trkNewTask">＋ 新建跟单</button></div><div id="trkTasks"></div><h4 class="trk-h">跟单记录（每一次决定：下单 / 模拟 / 跳过及原因）</h4><div class="trk-log" id="trkLog"></div></div></div>
 </section>
 <section class="track snipe hidden" id="snipe"><div class="snp"><div id="snpHead"></div><h4 class="trk-h">狙到的币（自动卖出盯着的）</h4><div id="snpPos"></div><div id="snpForm"></div><h4 class="trk-h">狙击记录（每一个新盘的决定、每一次自动卖出：下单 / 模拟 / 跳过及原因）</h4><div class="trk-log" id="snpLog"></div></div></section>
@@ -198,6 +191,7 @@
 
 <div class="toasts" id="toasts"></div>
 <script src="vendor/lightweight-charts.standalone.production.js?v=1792914154.2.0"></script>
-<script type="module" src="app.js?v=1793083721"></script>
+<script type="module" src="app.js?v=1793164604"></script>
+<script type="module" src="version.js?v=1"></script>
 </body>
 </html>
